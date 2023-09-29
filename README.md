@@ -61,7 +61,7 @@ python main.py  \
 
 
 
-## Acknowledgments Project
+## Acknowledgments
 This code is built upon codebase of [StyleSDF](https://github.com/royorel/StyleSDF), and it also contains submodules including [DualStyleGAN](https://github.com/williamyang1991/DualStyleGAN), [VToonify](https://github.com/williamyang1991/VToonify), [PerceptualSimilarity](https://github.com/shubhtuls/PerceptualSimilarity), and [facexlib](https://github.com/xinntao/facexlib).
 
 
