@@ -1,0 +1,14 @@
+__pycache__/
+checkpoint/
+evaluations/
+full_models/
+pretrained_renderer/
+wandb/
+cache/
+training_records/
+vis/
+external/facexlib/facexlib/weights/*pth
+external/DualStyleGAN/checkpoint/
+external/VToonify/checkpoint/
+out/
+data/
