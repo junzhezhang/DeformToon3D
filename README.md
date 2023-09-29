@@ -7,14 +7,27 @@
 <img src=./assets/teaser.png>
 </div>
 
-## Environment setup
+## Quick Setup
 
+### Environment
 ```
 conda env create --file environment.yml
 ```
 Alternatively, you may refer to StyleSDF environment setup.
+### Downloads
+Download the pre-trained models from [Google drive link](https://drive.google.com/file/d/1BtDRG5MEHSkCQXsPv1YHerxt1YJrNki3/view?usp=sharing), create folder ```./training_record/author_release/checkpoints``` and place the model under it.
+Download evaluate latents from [Google drive link](https://drive.google.com/file/d/1BtGbzRirMZqyg0jeST1_Kdt_XBxW2CPY/view?usp=sharing), place it under ```./data```.
 
-## Generate dataset
+
+## Quick Demo
+```
+python main.py  \
+--jobname author_release --latents_eval latents_eval_50k.pth \
+--exp_mode visualize_video --n_styles 11 --num_frames 250 \
+--given_subject_list 1000-1010 --style_id 7 
+```
+
+## Generate training dataset
 ### Generate real-space images and latents with pre-trained StyleSDF
 NOTE: to manually change output directories before running
 NOTE: You can generate more data and save it as latents_eval.pth for visualization.
@@ -50,18 +63,7 @@ python main.py  \
 --continue_training 49
 ```
 
-## Quick Demo
-You may run Generate real-space images and latents section to get the latents.pth or latents_eval.pth. Note our method generalizes well to unseen latents.
-```
-python main.py  \
---jobname job_name \
---exp_mode visualize_video --n_styles 11 --num_frames 250 \
---given_subject_list 1000-1010 --style_id 7 
-```
-
-
-
-## Acknowledgments Project
+## Acknowledgments
 This code is built upon codebase of [StyleSDF](https://github.com/royorel/StyleSDF), and it also contains submodules including [DualStyleGAN](https://github.com/williamyang1991/DualStyleGAN), [VToonify](https://github.com/williamyang1991/VToonify), [PerceptualSimilarity](https://github.com/shubhtuls/PerceptualSimilarity), and [facexlib](https://github.com/xinntao/facexlib).
 
 
