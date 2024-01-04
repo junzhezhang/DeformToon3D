@@ -311,7 +311,6 @@ class VolumeFeatureRenderer(nn.Module):
                 feat = torch.cat(feat_ls, dim=-1)
             else:
                 feat = None
-
             if self.style_opt.condition_latent_dim > 0:
                 if styles.dim() == 3:
                     c = styles[:,0,:]
@@ -325,7 +324,6 @@ class VolumeFeatureRenderer(nn.Module):
                 dx = self.style_field(inputs, c=c, feat=feat) # styles [B, 256]
                 dx_norm = torch.mean(torch.abs(dx), dim=(1,2,3,4)) # shape [B]
             elif self.style_opt.style_field_option == 'SIREN':
-                # import pdb; pdb.set_trace()
                 c_cat = torch.cat([c, exstyle], dim=-1)
                 c_mapped =  self.exstyle_mapping_net(c_cat)
                 dx = self.style_field(inputs.contiguous(), c_mapped)
@@ -334,7 +332,6 @@ class VolumeFeatureRenderer(nn.Module):
             elif self.style_opt.style_field_option == 'no_style_field':
                 dx = 0    
                 dx_norm = None
-            
             if self.style_opt.elastic_loss > 0:
                 grad_style = calculate_deformation_gradient(inputs, dx)
             else:

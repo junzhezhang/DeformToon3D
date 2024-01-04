@@ -663,9 +663,6 @@ class Decoder(nn.Module):
         else:
             styles: W, list of len=1, with shape [batch_size, (256)]
             latent:  [1, 10, 512]
-            noise:
-                input: None, always None?
-                after styles_and_noise_forward()? must it align with styles ? 
         exstyle: [B, 256]
         """
         interp_weights = [self.style_opt.decoder_interp_weights] * 10
@@ -901,7 +898,7 @@ class Generator(nn.Module):
                 thumb_rgb, features, sdf, mask, xyz, eikonal_term, others = self.renderer(cam_poses, 
                     focals, near, far, styles=latent[0], return_eikonal=return_eikonal, raw_latent_z=styles, exstyle=exstyle)
             if self.full_pipeline:
-                exstyle = others.get('mapped_exstyle', None)
+                exstyle = others['mapped_exstyle']
                 rgb, decoder_latent = self.decoder(features, latent,
                                                 transform=cam_poses if project_noise else None,
                                                 return_latents=return_latents,
@@ -947,7 +944,6 @@ class Generator(nn.Module):
                                                 mesh_path=mesh_path, exstyle=exstyle)
             else:
                 rgb = None
-        # others['sdf'] = sdf
         if return_latents:
             return rgb, decoder_latent
         else:
@@ -963,7 +959,7 @@ class Generator(nn.Module):
             if others is not None:
                 out += (others,)
             # if self.style_opt.elastic_loss > 0:
-            #     out += (grad_style,)
+            #     out += (grad_style,) 
 
             return out
 

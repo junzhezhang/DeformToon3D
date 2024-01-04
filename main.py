@@ -74,12 +74,12 @@ class ModelWrapper(nn.Module):
         grad_style_ls = []
         dx_norm_ls = []
         
-        # NOTE: exstyle_g0 and exstyle_g1 are for geo-tex swap
 
         for j in range(0, cam_extrinsics.shape[0], self.opt.style.style_chunk):
             
             ### assume chunk size is 1
             if is_chunk:
+                # curr_noise = [n[j:j+self.opt.style.style_chunk] for n in noise]
                 exstyle = batch['exstyle'][j:j+self.opt.style.style_chunk]
                 if 'exstyle_g0' in batch:
                     exstyle_g0 = batch['exstyle_g0'][j:j+self.opt.style.style_chunk]
@@ -143,7 +143,6 @@ class Runner(nn.Module):
         super().__init__()
         self.opt = opt
         self.device = 'cuda'
-        
         self.dataset = StyleFieldDataset(data_dir=self.opt.style.data_dir, source_data=self.opt.style.source_data, style_data=self.opt.style.style_data, train_split_ratio=self.opt.style.train_split_ratio)
         self.train_loader = DataLoader(self.dataset, batch_size=self.opt.style.style_batch, num_workers=self.opt.style.num_workers, shuffle=True, pin_memory=True)
         print('train loader size:', len(self.train_loader.dataset))
@@ -170,11 +169,12 @@ class Runner(nn.Module):
             self.model = nn.DataParallel(ModelWrapper(self.opt, self.generator, device=self.device).to(self.device))
     
     def construct_modules(self):
-        torch.cuda.empty_cache()
-        self.generator = Generator(self.opt.model, self.opt.rendering, style_opt=self.opt.style).to(self.device)
         self.exstyle_mapper = torch.nn.Embedding(self.opt.style.n_styles, self.opt.style.n_dim_exstyle).to(self.device)
+         # define model
+        self.generator = Generator(self.opt.model, self.opt.rendering, style_opt=self.opt.style).to(self.device)
         
-        # load parameters, able to load part of the model stored in pre-trained SDF
+        # load parameters NOTE: able to load part of the model stored in pre-trained SDF
+        
         checkpoint_path = os.path.join(self.opt.experiment.root_save_dir, 'full_models', self.opt.experiment.expname + '.pt')
         checkpoint = torch.load(checkpoint_path)
         pretrained_weights_dict = checkpoint["g_ema"]
@@ -196,21 +196,25 @@ class Runner(nn.Module):
             self.discriminator = Discriminator(self.opt.model).to(self.device)
             self.discriminator.load_state_dict(checkpoint["d"])
         
-        self.load_checkpoint()
+
+
+        self.begin_epoch = 0
         
         if self.opt.experiment.exp_mode != 'train':
+            self.load_checkpoint()
             return
 
-        # define parameters to train
+        # define parameters to train or fine-tune
+        # default all parameters do not require grad
         for param in self.generator.parameters():
             param.requires_grad = False
         if self.opt.style.style_field:
+            # self.train_nets =[self.generator.renderer.style_field]
             self.train_nets ={
                 'style_field': self.generator.renderer.style_field,
             }
             for param in self.generator.renderer.style_field.parameters():
                 param.requires_grad = True
-
             if self.opt.style.adaptive_style_mixing and len(self.opt.style.adaptive_style_mixing_blocks) > 0:
                 self.train_nets['decoder_res'] = self.generator.decoder.res
                 self.train_nets['decoder_t_c'] = self.generator.decoder.t_c
@@ -218,7 +222,35 @@ class Runner(nn.Module):
                     param.requires_grad = True
                 for param in self.generator.decoder.t_c.parameters():
                     param.requires_grad = True
-          
+        else:
+            raise
+        
+        if len(self.opt.style.finetune_nets) > 0:
+            assert not self.opt.style.adaptive_style_mixing, "Do not fine-tune decoder in this mode!!!"
+            self.finetune_nets = {}
+            nets_to_require_grad = []
+            finetune_net_names = self.opt.style.finetune_nets.split('+')
+            # specified blocks in decoder to fine-tune
+            if 'conv' in self.opt.style.finetune_nets:
+                self.finetune_nets['decoder'] = self.generator.decoder
+                if 'conv4' in finetune_net_names:
+                    nets_to_require_grad += [self.generator.decoder.convs[6:8] + self.generator.decoder.to_rgbs[3:4]]
+                if 'conv3' in finetune_net_names:
+                    nets_to_require_grad += [self.generator.decoder.convs[4:6] + self.generator.decoder.to_rgbs[2:3]]
+                if 'conv2' in finetune_net_names:
+                    nets_to_require_grad += [self.generator.decoder.convs[2:4] + self.generator.decoder.to_rgbs[1:2]]
+                if 'conv1' in finetune_net_names:
+                    nets_to_require_grad += [self.generator.decoder.convs[0:2] + self.generator.decoder.to_rgbs[0:1]]
+                if 'conv0' in finetune_net_names:
+                    nets_to_require_grad += [self.generator.decoder.conv1 + self.generator.decoder.to_rgb1]
+            # specified blocks in renderer.network to fine-tune
+            if 'linear' in self.opt.style.finetune_nets:
+                self.finetune_nets['renderer_network'] = self.generator.renderer.network
+                nets_to_require_grad += [getattr(self.generator.renderer.network,itm) for itm in finetune_net_names if 'linear' in itm]
+            for sub_net in nets_to_require_grad:
+                for param in sub_net.parameters():
+                    param.requires_grad = True
+    
     def define_losses(self):
         if self.opt.style.l1_loss > 0: 
             self.l1_loss_fn = nn.L1Loss()
@@ -228,10 +260,16 @@ class Runner(nn.Module):
             self.elastic_loss_fn = JacobianSmoothness().to(self.device)
 
     def configure_optimizers(self):
-        # No weight decay here
         params_to_train = []
         for key, val in self.train_nets.items():
             params_to_train += list(val.parameters())
+        # finetune
+        if len(self.opt.style.finetune_nets) > 0:
+            params_to_finetune = []
+            for key, val in self.finetune_nets.items():
+                params_to_finetune += list(val.parameters())
+            params_to_finetune_ls = [{'params': itm, 'lr': self.opt.style.finetune_lr} for itm in params_to_finetune]
+            params_to_train += params_to_finetune
 
         self.optimizer = torch.optim.Adam(params_to_train, 
             lr=self.opt.style.train_lr, betas=(0.9, 0.999), weight_decay=self.opt.style.weight_decay)
@@ -257,7 +295,7 @@ class Runner(nn.Module):
             elastic_loss = self.elastic_loss_fn(forward_output['grad_style_batch'])
             self.loss_stats.update({"train/elastic_loss": elastic_loss})
             loss += self.opt.style.elastic_loss * elastic_loss
-        # log dx_norm for analysis only TODO
+        # log dx_norm for analysis only 
         if 'dx_norm_batch' in forward_output:
             self.loss_stats.update({"train/dx_norm": forward_output['dx_norm_batch']})
         if self.opt.style.gan_loss > 0:
@@ -280,7 +318,7 @@ class Runner(nn.Module):
                 batch[k] = batch[k].to(self.device)
 
         return batch
-        
+
     def train(self):
         print('start training from epoch', self.begin_epoch)
         self.max_iter = len(self.train_loader)
@@ -400,8 +438,6 @@ class Runner(nn.Module):
                 param.requires_grad = flag
     
     def load_checkpoint(self):
-        self.begin_epoch = 0
-
         if self.opt.experiment.continue_training > -1 :
             checkpoint_path = os.path.join(self.opt.experiment.root_save_dir, 'training_records', self.opt.style.jobname, 'checkpoints', f'{self.opt.experiment.continue_training}.pth')
         else:
@@ -448,6 +484,7 @@ class Runner(nn.Module):
                 if k in model_dict2:
                     model_dict2[k] = v
             self.surface_g.load_state_dict(model_dict2)
+
         return     
     
     def save_checkpoint(self, epoch, last=False):        
@@ -479,18 +516,16 @@ class Runner(nn.Module):
     
     def prepare_subj_ls(self, return_latent_dict=True):
         subj_ls = []
-        # import pdb; pdb.set_trace()
         ranges = opt.inference.given_subject_list.split(',')
         for this_range in ranges:
             if '-' in this_range:
-                
                 min_subj, max_subj = this_range.split('-')
                 for i in range(int(min_subj), int(max_subj)):
                     subj_ls.append(int(i))
                 # subj_ls.extend(range.split('-'))
             else:
                 subj_ls.append(int(this_range))
-        print(f'subj ls len: {len(subj_ls)}, {subj_ls[0]}-{subj_ls[-1]}', )
+        print(f'subject list len: {len(subj_ls)}, {subj_ls[0]}-{subj_ls[-1]}')
         if not return_latent_dict:
             return subj_ls
         tic = time.time()
@@ -513,7 +548,6 @@ class Runner(nn.Module):
         } 
         batch = self.to_cuda(batch)
         return batch
-        
 
     def visualize_video(self):
         surface_mean_latent = [self.mean_latent[0].clone().detach()]
@@ -567,7 +601,7 @@ class Runner(nn.Module):
         #                 ambient_color=((0.1,.1,.1),), diffuse_color=((0.75,.75,.75),),
         #                 device=self.device)
         
-        parent_dir = os.path.join(self.opt.experiment.root_save_dir, 'vis/_ours')
+        parent_dir = os.path.join(self.opt.experiment.root_save_dir, 'visual/_ours')
         method_dir = os.path.join(parent_dir, f'video_{self.opt.style.jobname}')
         os.makedirs(parent_dir, exist_ok=True)
         os.makedirs(method_dir, exist_ok=True)
@@ -617,7 +651,108 @@ class Runner(nn.Module):
                 writer.writeFrame(rgb[k])
             writer.close()
 
-                             
+    def visualize_surface(self):
+        surface_mean_latent = [self.mean_latent[0].clone().detach()]
+        num_frames = self.opt.inference.num_frames
+        # Generate video trajectory
+        trajectory = np.zeros((num_frames,3), dtype=np.float32)
+
+        # set camera trajectory
+        # sweep azimuth angles (4 seconds)
+        if self.opt.inference.azim_video:
+            t = np.linspace(0, 1, num_frames)
+            elev = 0
+            fov = opt.camera.fov
+            if opt.camera.uniform:
+                azim = self.opt.camera.azim * np.cos(t * 2 * np.pi)
+            else:
+                azim = 1.5 * self.opt.camera.azim * np.cos(t * 2 * np.pi)
+
+            trajectory[:num_frames,0] = azim
+            trajectory[:num_frames,1] = elev
+            trajectory[:num_frames,2] = fov
+
+        # elipsoid sweep (4 seconds)
+        else:
+            t = np.linspace(0, 1, num_frames)
+            fov = self.opt.camera.fov #+ 1 * np.sin(t * 2 * np.pi)
+            if self.opt.camera.uniform:
+                elev = self.opt.camera.elev / 2 + self.opt.camera.elev / 2  * np.sin(t * 2 * np.pi)
+                azim = self.opt.camera.azim  * np.cos(t * 2 * np.pi)
+            else:
+                elev = 1.5 * self.opt.camera.elev * np.sin(t * 2 * np.pi)
+                azim = 1.5 * self.opt.camera.azim * np.cos(t * 2 * np.pi)
+
+            trajectory[:num_frames,0] = azim
+            trajectory[:num_frames,1] = elev
+            trajectory[:num_frames,2] = fov
+
+        trajectory = torch.from_numpy(trajectory).to(self.device)
+
+        sample_cam_extrinsics, sample_focals, sample_near, sample_far, _ = \
+        generate_camera_params(self.opt.training.renderer_output_size, self.device, locations=trajectory[:,:2],
+                            fov_ang=trajectory[:,2:], dist_radius=self.opt.camera.dist_radius)
+        
+        parent_dir = os.path.join(self.opt.experiment.root_save_dir, 'visual/_ours')
+        method_dir = os.path.join(parent_dir, f'video_{self.opt.style.jobname}')
+        os.makedirs(parent_dir, exist_ok=True)
+        os.makedirs(method_dir, exist_ok=True)
+        style_id = self.opt.style.style_id
+        subj_ls, latent_dict = self.prepare_subj_ls() 
+        for subj in subj_ls:
+            batch = self.prepare_batch_from_latent(subj, latent_dict)
+            # depth video
+            depth_filename = '{}_s{}_surface.mp4'.format(subj, style_id)
+            mesh_ls = []
+            depth_writer = skvideo.io.FFmpegWriter(os.path.join(method_dir, depth_filename),
+                                outputdict={'-pix_fmt': 'yuv420p', '-crf': '1'})
+
+            scale = 2.0
+            sample_z = batch['z'][0:1]
+            for view in tqdm(range(num_frames)):
+                batch['style_id'] = torch.Tensor([style_id]).long().cuda()
+                batch['exstyle'] = self.exstyle_mapper(batch['style_id']) # (B, 256)
+                surface_out = self.surface_g([sample_z],
+                                                sample_cam_extrinsics[view:view+1],
+                                                sample_focals[view:view+1],
+                                                sample_near[view:view+1],
+                                                sample_far[view:view+1],
+                                                truncation=self.opt.inference.truncation_ratio,
+                                                truncation_latent=surface_mean_latent,
+                                                return_sdf=True,
+                                                return_xyz=True,
+                                                exstyle=batch['exstyle'])
+                    
+                xyz = surface_out[2].cpu()
+                sdf = surface_out[3].cpu()
+                del surface_out
+                torch.cuda.empty_cache()
+                depth_mesh = xyz2mesh(xyz)
+                mesh = Meshes(
+                    verts=[torch.from_numpy(np.asarray(depth_mesh.vertices)).to(torch.float32).to(self.device)],
+                    faces = [torch.from_numpy(np.asarray(depth_mesh.faces)).to(torch.float32).to(self.device)],
+                    textures=None,
+                    verts_normals=[torch.from_numpy(np.copy(np.asarray(depth_mesh.vertex_normals))).to(torch.float32).to(self.device)],
+                )
+                mesh = add_textures(mesh)
+                cameras = create_cameras(azim=np.rad2deg(trajectory[view,0].cpu().numpy()),
+                                                elev=np.rad2deg(trajectory[view,1].cpu().numpy()),
+                                                fov=2*trajectory[view,2].cpu().numpy(),
+                                                dist=1, device=self.device)
+                renderer = create_mesh_renderer(cameras, image_size=512,
+                                            light_location=((0.0,1.0,5.0),), specular_color=((0.2,0.2,0.2),),
+                                            ambient_color=((0.1,0.1,0.1),), diffuse_color=((0.65,.65,.65),),
+                                            device=self.device)
+
+                mesh_image = 255 * renderer(mesh).cpu().numpy()
+                mesh_image = mesh_image[...,:3]
+                mesh_ls.append((mesh_image[0]).astype(np.uint8))
+                torch.cuda.empty_cache()
+                
+            for k in range(num_frames):
+                depth_writer.writeFrame(mesh_ls[k])
+            depth_writer.close()
+
     def save_image(self, batch, forward_output, stem=None, save_dir=None, max_rows=11):
         downsampler_mode =self.opt.style.downsize_interpolation
         img_resized_ls = [F.interpolate(itm, size=(self.opt.style.vis_size, self.opt.style.vis_size), mode=downsampler_mode) for itm in forward_output]
@@ -799,12 +934,14 @@ if __name__ == '__main__':
     opt.rendering.static_viewdirs = True
     opt.rendering.force_background = True
     if not opt.experiment.exp_mode == 'train':
-        opt.rendering.perturb = 0 # TODO change it
-    opt.inference.project_noise = opt.model.project_noise # TODO verify if useful
-    opt.inference.return_xyz = opt.rendering.return_xyz # TODO verify if useful
+        opt.rendering.perturb = 0 
+    opt.inference.project_noise = opt.model.project_noise 
+    opt.inference.return_xyz = opt.rendering.return_xyz 
     
     runner = Runner(opt)
     if opt.experiment.exp_mode == 'train':
         runner.train()
     elif opt.experiment.exp_mode == 'visualize_video':
         runner.visualize_video()
+    elif opt.experiment.exp_mode == 'visualize_surface':
+        runner.visualize_surface()

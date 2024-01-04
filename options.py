@@ -21,7 +21,6 @@ class BaseOptions():
         experiment.add_argument("--load_epoch", type=str, default='latest', help='load epoch')
         experiment.add_argument("--root_save_dir", type=str, default='.', help="if ., use the same path as the code, otherwise, use the specified path")
         experiment.add_argument("--exp_mode", type=str, default='train', help="train|etc")
-        
         # Training loop options
         training = self.parser.add_argument_group('training')
         training.add_argument("--checkpoints_dir", type=str, default='./checkpoint', help='checkpoints directory name')
@@ -68,8 +67,8 @@ class BaseOptions():
         inference.add_argument("--base_model_path", type=str, default='ffhq1024x1024.pt', help="base model for interpolation")
         inference.add_argument("--interpolation_mode", type=str, default='full', help="interpolation mode for baseline method, full|renderer|decoder")
         inference.add_argument("--checkpoint_path", type=str, default='', help='checkpoint for baseline')        
-        inference.add_argument("--given_latent_cam", action="store_true")  
-
+        inference.add_argument("--given_latent_cam", action="store_true")
+        
         # Generator options
         model = self.parser.add_argument_group('model')
         model.add_argument("--size", type=int, default=1024, help="image sizes for the model")
@@ -134,12 +133,21 @@ class BaseOptions():
                            default='real_space+style_pixar_9_0705+style_comic_34_0707+style_slamdunk_66_0607+style_caricature_17_0808+style_caricature_49_0808+style_caricature_92_0808+style_cartoon_91_0805+style_cartoon_299_0505+style_cartoon_221_0710+style_cartoon_252_0808', 
                            help='style data')
         style.add_argument("--latents_eval", type=str, 
-                           default='latents_eval.pth', 
+                           default='latents_eval_50k.pth', 
                            help='pth file of latents for eval')
         style.add_argument("--weight_decay", type=float, default=0, 
                            help='weight_decay')
         style.add_argument("--jobname", type=str, default='dummy', 
                            help='jobname')
+        style.add_argument("--finetune_nets", type=str, default='', 
+                           help='conv4, conv3, conv2, conv1, conv0, renderer etc, connect with +')
+        style.add_argument("--finetune_lr", type=float, default=1e-4, 
+                           help='fine-tuning learning rate')
+        style.add_argument("--continue_train_jobname", type=str, default='xxx', 
+                           help='if use gan_loss, train from another expname')        
+        style.add_argument("--condition_on_z", action='store_true', 
+                           help='condition on z instead of w')
+
         # checkpoint and visualization
         style.add_argument("--log_interval", type=int, default=10, 
                            help="log interval for display train loss")
@@ -153,17 +161,16 @@ class BaseOptions():
                            help='size for visualized images')
         style.add_argument("--downsize_interpolation", type=str, default='nearest', 
                            help='interpolation for downsampling images')  
+        style.add_argument("--vis_freq", type=int, default=500, help='frquency to visualize')
         # losses
-        style.add_argument("--l1_loss", type=float, default=0, \
+        style.add_argument("--l1_loss", type=float, default=0,
                            help='Weight of L1 loss, disabled if 0.')
         style.add_argument("--percep_loss", type=float, default=1.0, 
                            help="Weight of perceputal loss, disabled if 0.")
-        style.add_argument("--elastic_loss", type=float, default=0.01,
-                           help="Weight of elastic loss, disabled if 0.")
+        style.add_argument("--elastic_loss", type=float, default=0,
+                           help="Weight of elastic loss, disabled if 0. 0.01 for training and 0 for inference.")
         style.add_argument("--gan_loss", type=float, default=0, 
                            help="Weight of GAN loss, disabled if 0. It is set 0 at the beginning of training, and 0.05 after 50 epochs.")
-        # style.add_argument("--gan_loss_from_n_epoch", type=float, default=50, 
-        #                    help="Enable GAN loss from which epoch.")
         # StyleField
         style.add_argument("--style_field", action='store_false', default=True,
                            help='adaptive style mixing')
@@ -176,7 +183,7 @@ class BaseOptions():
         style.add_argument("--condition_on_nerf_feat", type=str, default='', 
                            help='conditioned on nerf features, 0,1,2, concat')
         # Adaptive Style Mixing
-        style.add_argument("--adaptive_style_mixing", action='store_false', default=True,
+        style.add_argument("--adaptive_style_mixing", action='store_false', 
                            help='adaptive style mixing')
         style.add_argument("--adaptive_style_mixing_blocks", type=str, default='conv4+conv3+conv2+conv1+conv0', 
                            help='adaptive style mixing blocks, conv4, conv3, conv2, conv1, conv0, renderer etc, connect with +')
@@ -191,7 +198,6 @@ class BaseOptions():
         style.add_argument("--style_id", type=int, default=0, help='')
         style.add_argument("--interp_mode", type=str, default='', help='both_decoder_dx_scale|dx_scale|decoder')
         style.add_argument("--interp_weights_str", type=str, default='0,0.5,0.75,0.9,1', help='both_decoder_dx_scale|dx_scale|decoder')
-
 
 
         self.initialized = True
