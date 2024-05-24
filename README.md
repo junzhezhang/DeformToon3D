@@ -14,6 +14,10 @@ conda env create --file environment.yml
 ```
 Alternatively, you may refer to StyleSDF environment setup.
 
+### Downloads
+Download the pre-trained models from [Google drive link](https://drive.google.com/file/d/1BtDRG5MEHSkCQXsPv1YHerxt1YJrNki3/view?usp=sharing), create folder ```./training_record/author_release/checkpoints``` and place the model under it.
+Download evaluate latents from [Google drive link](https://drive.google.com/file/d/1BtGbzRirMZqyg0jeST1_Kdt_XBxW2CPY/view?usp=sharing), place it under ```./data```.
+
 ## Generate dataset
 ### Generate real-space images and latents with pre-trained StyleSDF
 NOTE: to manually change output directories before running
